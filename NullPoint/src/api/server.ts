@@ -16,12 +16,23 @@ import cors from 'cors'
 import path from 'path'
 import crypto from 'crypto'
 import * as dotenv from 'dotenv'
+import rateLimit from 'express-rate-limit'
 import { getAgent } from '../agent/index'
 dotenv.config()
 
 const app = express()
 app.use(cors())
 app.use(express.json())
+
+app.use(
+  rateLimit({
+    windowMs: 60_000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+)
+
 
 // ── Serve the UI ───────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../../ui')))

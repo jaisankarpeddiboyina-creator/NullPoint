@@ -12,10 +12,21 @@ export const lastResults: Record<string, any> = {}
 
 async function get(url: string, params?: Record<string, any>): Promise<any> {
   const fullUrl = params ? `${url}?${new URLSearchParams(params as any)}` : url
-  const res = await fetch(fullUrl, { headers: { 'User-Agent': 'NullPoint/1.0' } })
-  if (!res.ok) throw new Error(`${res.status} ${url}`)
-  const ct = res.headers.get('content-type') || ''
-  return ct.includes('json') ? res.json() : res.text()
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
+
+  try {
+    const res = await fetch(fullUrl, {
+      headers: { 'User-Agent': 'NullPoint/1.0' },
+      signal: controller.signal
+    })
+    if (!res.ok) throw new Error(`${res.status} ${url}`)
+    const ct = res.headers.get('content-type') || ''
+    return ct.includes('json') ? res.json() : res.text()
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 function reg(ai: AILink, name: string, fn: (a: any) => Promise<any>, description: string, parameters: any, group: string) {
