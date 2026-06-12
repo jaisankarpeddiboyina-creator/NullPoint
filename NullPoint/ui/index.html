@@ -4,6 +4,105 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>NullPoint — Everything else is noise.</title>
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'
+  import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js'
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDSURBKsgVjtAppOJ__7-Qy9z2DB9p7p2Y",
+    authDomain: "nullpoint-4d163.firebaseapp.com",
+    projectId: "nullpoint-4d163",
+    storageBucket: "nullpoint-4d163.firebasestorage.app",
+    messagingSenderId: "604797801728",
+    appId: "1:604797801728:web:e8aefdf6d72645c94e8fe5"
+  }
+
+  const app = initializeApp(firebaseConfig)
+  const auth = getAuth(app)
+  const db = getFirestore(app)
+  const provider = new GoogleAuthProvider()
+
+  let currentUser = null
+
+  // Auth state listener
+  onAuthStateChanged(auth, async (user) => {
+    currentUser = user
+    if (user) {
+      document.getElementById('auth-btn').textContent = 'Sign Out'
+      document.getElementById('user-name').textContent = user.displayName
+      document.getElementById('user-avatar').src = user.photoURL
+      document.getElementById('user-info').style.display = 'flex'
+      await loadHistory()
+    } else {
+      document.getElementById('auth-btn').textContent = 'Sign in with Google'
+      document.getElementById('user-info').style.display = 'none'
+    }
+  })
+
+  // Login/logout
+  window.handleAuth = async () => {
+    if (currentUser) {
+      await signOut(auth)
+    } else {
+      await signInWithPopup(auth, provider)
+    }
+  }
+
+  // Save message to Firebase
+  window.saveToHistory = async (userMsg, botResponse) => {
+    if (!currentUser) return
+    await addDoc(collection(db, 'users', currentUser.uid, 'chats'), {
+      userMessage: userMsg,
+      botResponse: botResponse,
+      timestamp: serverTimestamp()
+    })
+    await loadHistory()
+  }
+
+  const appendMessage = (sender, text) => {
+    if (sender === 'user') {
+      const msgs = document.getElementById('msgs')
+      if (msgs) msgs.innerHTML = ''
+      addUser(text)
+    } else {
+      hideEmpty()
+      msgCount++
+      const mid = 'msg' + msgCount
+      const el = document.createElement('div')
+      el.className = 'msg msg-a'
+      el.innerHTML = `
+        <div class="bubble bubble-a" id="bb${mid}">
+          ${fmt(text)}
+        </div>
+        <div class="rich" id="rc${mid}"></div>
+        <div class="meta" id="mm${mid}"></div>`
+      const msgs = document.getElementById('msgs')
+      if (msgs) msgs.appendChild(el)
+      scroll()
+    }
+  }
+
+  // Load history
+  window.loadHistory = async () => {
+    if (!currentUser) return
+    const q = query(collection(db, 'users', currentUser.uid, 'chats'), orderBy('timestamp', 'desc'), limit(20))
+    const snapshot = await getDocs(q)
+    const historyContainer = document.getElementById('history-list')
+    historyContainer.innerHTML = ''
+    snapshot.forEach(doc => {
+      const data = doc.data()
+      const item = document.createElement('div')
+      item.className = 'history-item'
+      item.textContent = data.userMessage
+      item.onclick = () => {
+        appendMessage('user', data.userMessage)
+        appendMessage('bot', data.botResponse)
+      }
+      historyContainer.appendChild(item)
+    })
+  }
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -121,9 +220,34 @@ textarea::placeholder{color:var(--t3)}
 .btn-send svg{width:15px;height:15px;fill:#000}
 .inp-hint{font-size:11px;color:var(--t3);text-align:center;margin-top:8px}
 .inp-hint kbd{background:var(--s1);border:1px solid var(--b2);border-radius:3px;padding:1px 5px;font-family:monospace;font-size:10px}
+.history-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--s2);
+  border: 1px solid var(--b1);
+  border-radius: var(--rs);
+  color: var(--t2);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.15s ease;
+}
+.history-item:hover {
+  background: var(--s3);
+  border-color: var(--ac);
+  color: var(--t1);
+}
 </style>
 </head>
 <body>
+<div id="history-sidebar" style="position:fixed; left:0; top:0; width:240px; height:100vh; background:#111; border-right:1px solid #222; padding:16px; overflow-y:auto; transform:translateX(-240px); transition:transform 0.3s; z-index:100;">
+  <h3 style="color:#00e5ff; margin:0 0 16px;">History</h3>
+  <div id="history-list"></div>
+</div>
+<button onclick="const sb = document.getElementById('history-sidebar'); const open = sb.style.transform === 'translateX(0px)'; sb.style.transform = open ? 'translateX(-240px)' : 'translateX(0px)'; this.style.transform = open ? 'translateX(0px)' : 'translateX(240px)'" style="position:fixed; left:12px; top:50%; background:#222; border:1px solid #333; color:#fff; padding:8px; border-radius:8px; cursor:pointer; z-index:101; transition:transform 0.3s;">☰</button>
+
 <div class="app">
 
   <header class="hdr">
@@ -133,6 +257,11 @@ textarea::placeholder{color:var(--t3)}
     </div>
     <div class="hdr-r">
       <div class="dot"></div>
+      <div id="user-info" style="display:none; align-items:center; gap:8px;">
+        <img id="user-avatar" style="width:28px; height:28px; border-radius:50%;" />
+        <span id="user-name" style="color:#fff; font-size:13px;"></span>
+      </div>
+      <button id="auth-btn" onclick="handleAuth()" style="background:#00e5ff; color:#000; border:none; padding:6px 14px; border-radius:20px; cursor:pointer; font-weight:600;">Sign in with Google</button>
       <button class="btn-new" onclick="newChat()">New Chat</button>
     </div>
   </header>
@@ -416,6 +545,9 @@ async function send(){
           if(d.message) throw new Error(d.message)
         }catch(e){if(e.message&&!e.message.includes('JSON')) throw e}
       }
+    }
+    if (started && text) {
+      await window.saveToHistory(q, text)
     }
   }catch(e){
     bb.innerHTML='<span style="color:var(--red)">⚠ '+esc(e.message)+'</span>'
