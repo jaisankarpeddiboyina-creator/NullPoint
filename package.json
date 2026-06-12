@@ -1,0 +1,17 @@
+{
+  "name": "nullpoint-root",
+  "private": true,
+  "workspaces": [
+    "NullPoint"
+  ],
+  "scripts": {
+    "build": "npm --workspace nullpoint run build",
+    "typecheck": "npm --workspace nullpoint run typecheck",
+    "dev": "npm --workspace nullpoint run dev",
+    "start": "npm --workspace nullpoint start",
+    "cli": "npm --workspace nullpoint run cli",
+    "diagnostics:groq": "npm --workspace nullpoint run diagnostics:groq",
+    "diagnostics:ailink": "npm --workspace nullpoint run diagnostics:ailink",
+    "diagnostics:ailink-tools": "npm --workspace nullpoint run diagnostics:ailink-tools"
+  }
+}
