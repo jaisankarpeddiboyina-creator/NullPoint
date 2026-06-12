@@ -98,6 +98,16 @@ export class NullPointAgent {
     const groups = routeQuery(input)
     console.log(`🧭  [${groups.join(', ')}]  "${input.slice(0, 60)}"`)
 
+    if (groups.includes('meta')) {
+      return {
+        text: "Here's everything I can do: Weather forecasts, Crypto & currency prices, Wikipedia knowledge, Top news & space news, Anime & TV shows, Books, Recipes & food, Art & paintings, Research papers, GitHub profiles, CVE vulnerabilities, F1 standings, Pokemon, Music search, Jobs, World Bank data, AI image generation, Jokes, Quotes, Disease stats, Country info, Historical events, Dictionary & translation. Just ask naturally.",
+        toolsUsed: [],
+        richContent: [],
+        groups: ['meta'],
+        duration: 0
+      }
+    }
+
     // 2. RAG — build context from session memory
     const ctx = recall(input)
 
@@ -123,6 +133,15 @@ export class NullPointAgent {
       for (const toolName of toolsUsed) {
         const richType = RICH_MAP[toolName]
         if (richType && lastResults[toolName]) {
+          if (toolName === 'getWikipediaSummary' && lastResults[toolName].thumbnail) {
+            richContent.push({
+              type: 'image',
+              toolName,
+              data: { url: lastResults[toolName].thumbnail, title: lastResults[toolName].title }
+            })
+            continue
+          }
+
           richContent.push({ type: richType, toolName, data: lastResults[toolName] })
         }
       }

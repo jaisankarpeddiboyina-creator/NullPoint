@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "ts-node src/api/server.ts",
+    "deploy": "wrangler deploy",
+    "dev:worker": "wrangler dev",
     "prestart": "npm run build",
     "start": "node dist/api/server.js",
     "cli": "ts-node src/cli/index.ts",

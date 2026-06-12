@@ -5,6 +5,7 @@
  */
 
 const GROUPS: Record<string, string[]> = {
+  meta:          ['what can you do','your capabilities','help','features','what are you','tools','abilities','commands','capabilities'],
   weather:       ['weather','temperature','forecast','rain','snow','wind','humidity','climate','storm','sunny','cold','hot','degrees','celsius','fahrenheit'],
   news:          ['news','latest','today','breaking','headline','article','report','hacker news','tech news','spaceflight'],
   finance:       ['crypto','bitcoin','ethereum','price','currency','exchange','dollar','euro','pound','market','coin','solana','usd','eur','gbp','rate','forex'],
@@ -37,10 +38,14 @@ function score(query: string, keywords: string[]): number {
 }
 
 export function routeQuery(query: string, max = 3): string[] {
-  const scored = Object.entries(GROUPS)
+  const ranked = Object.entries(GROUPS)
     .map(([group, kws]) => ({ group, score: score(query, kws) }))
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score)
+
+  if (ranked[0]?.group === 'meta') return ['meta']
+
+  const scored = ranked
     .slice(0, max)
     .map(x => x.group)
 

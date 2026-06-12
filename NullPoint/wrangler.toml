@@ -1,0 +1,10 @@
+name = "nullpoint"
+main = "src/worker.ts"
+compatibility_date = "2025-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+[limits]
+cpu_ms = 30000
+
+[vars]
+NODE_ENV = "production"

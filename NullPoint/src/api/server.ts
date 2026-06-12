@@ -16,7 +16,6 @@ import cors from 'cors'
 import path from 'path'
 import crypto from 'crypto'
 import * as dotenv from 'dotenv'
-import rateLimit from 'express-rate-limit'
 import { getAgent } from '../agent/index'
 dotenv.config()
 
@@ -24,15 +23,20 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-app.use(
-  rateLimit({
-    windowMs: 60_000,
-    limit: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-)
-
+const requestCounts = new Map<string, {count: number, reset: number}>()
+function simpleRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const ip = req.headers['cf-connecting-ip'] as string || req.ip || 'unknown'
+  const now = Date.now()
+  const record = requestCounts.get(ip)
+  if (!record || now > record.reset) {
+    requestCounts.set(ip, { count: 1, reset: now + 60000 })
+    return next()
+  }
+  if (record.count >= 30) return res.status(429).json({ error: 'Too many requests, slow down.' })
+  record.count++
+  next()
+}
+app.use('/api/', simpleRateLimit)
 
 // ── Serve the UI ───────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../../ui')))
@@ -165,4 +169,8 @@ export function startServer() {
   return server
 }
 
-startServer()
+if (process.env.NODE_ENV !== 'production') {
+  startServer()
+}
+
+export default app
