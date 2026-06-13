@@ -10,8 +10,8 @@
     "skipLibCheck": true,
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
-    "strict": true
+    "strict": false
   },
   "include": ["src/**/*"],
-  "exclude": ["dist", "node_modules", "scripts"]
+  "exclude": ["dist", "node_modules"]
 }

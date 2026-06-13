@@ -184,6 +184,9 @@
     window.handleAuth = () => alert('Auth unavailable. Check server.')
     window.saveToHistory = async () => {}
     window.loadHistory = async () => {}
+    window.checkUsage = async () => ({ allowed: true, plan: 'free', used: 0, limit: 20 })
+    window.incrementUsage = async () => {}
+    window.showPaywall = () => alert('Please sign in to continue using NullPoint.')
   }
 </script>
 <style>
@@ -588,17 +591,19 @@ function addUser(text){
   scroll()
 
   chatMessageCount++
-  window.checkUsage().then(usage => {
-    const max = MAX_MESSAGES_PER_CHAT[usage.plan] || 10
-    if (chatMessageCount >= max) {
-      setTimeout(() => {
-        if(confirm('Long conversation detected. Start a new chat to keep responses accurate and fast?')) {
-          newChat()
-          chatMessageCount = 0
-        }
-      }, 500)
-    }
-  })
+  if (typeof window.checkUsage === 'function') {
+    window.checkUsage().then(usage => {
+      const max = MAX_MESSAGES_PER_CHAT[usage.plan] || 10
+      if (chatMessageCount >= max) {
+        setTimeout(() => {
+          if(confirm('Long conversation detected. Start a new chat to keep responses accurate and fast?')) {
+            newChat()
+            chatMessageCount = 0
+          }
+        }, 500)
+      }
+    }).catch(() => {})
+  }
 }
 
 function addBot(){
@@ -632,13 +637,14 @@ async function send(){
 
   busy=true; el.value=''; el.style.height='auto'; $('sendBtn').disabled=true
 
-  addUser(q)
-  const botMsg=addBot()
-  const bb=botMsg.bb, rc=botMsg.rc, mm=botMsg.mm
-
   let text='', started=false, content=[]
+  let bb, rc, mm
 
   try{
+    addUser(q)
+    const botMsg=addBot()
+    bb=botMsg.bb; rc=botMsg.rc; mm=botMsg.mm
+
     const resp=await fetch(`${BASE}/stream`,{
       method:'POST',
       headers:{'Content-Type':'application/json','X-NullPoint-Key':KEY},

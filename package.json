@@ -1,17 +1,35 @@
 {
-  "name": "nullpoint-root",
+  "name": "nullpoint",
+  "version": "1.0.0",
+  "description": "Everything else is noise.",
   "private": true,
-  "workspaces": [
-    "NullPoint"
-  ],
+  "main": "dist/api/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "build": "npm --workspace nullpoint run build",
-    "typecheck": "npm --workspace nullpoint run typecheck",
-    "dev": "npm --workspace nullpoint run dev",
-    "start": "npm --workspace nullpoint start",
-    "cli": "npm --workspace nullpoint run cli",
-    "diagnostics:groq": "npm --workspace nullpoint run diagnostics:groq",
-    "diagnostics:ailink": "npm --workspace nullpoint run diagnostics:ailink",
-    "diagnostics:ailink-tools": "npm --workspace nullpoint run diagnostics:ailink-tools"
+    "dev": "nodemon --exec ts-node src/api/server.ts --ext ts",
+    "start": "node dist/api/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "cli": "ts-node src/cli/index.ts",
+    "deploy": "wrangler deploy",
+    "dev:worker": "wrangler dev"
+  },
+  "dependencies": {
+    "@ailink/sdk": "^0.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.0",
+    "firebase-admin": "^10.3.0",
+    "razorpay": "^2.9.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.0",
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "nodemon": "^3.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
   }
 }
