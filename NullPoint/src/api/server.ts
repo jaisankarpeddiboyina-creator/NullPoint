@@ -17,7 +17,36 @@ import path from 'path'
 import crypto from 'crypto'
 import * as dotenv from 'dotenv'
 import { getAgent } from '../agent/index'
+import Razorpay from 'razorpay'
+import { initializeApp, cert, getApps } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
+
 dotenv.config()
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID!,
+  key_secret: process.env.RAZORPAY_KEY_SECRET!
+})
+
+// Initialize Firebase Admin once
+let adminDb: any = null
+const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+if (!getApps().length) {
+  if (privateKey && privateKey.startsWith('-----BEGIN')) {
+    initializeApp({
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey
+      })
+    })
+    adminDb = getFirestore()
+  } else {
+    console.warn('⚠️ Firebase credentials not configured. Firebase Admin operations will be disabled.')
+  }
+} else {
+  adminDb = getFirestore()
+}
 
 const app = express()
 app.use(cors())
@@ -71,8 +100,49 @@ app.get('/api/config', (req, res) => {
     projectId: process.env.FIREBASE_PROJECT_ID,
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.FIREBASE_APP_ID
+    appId: process.env.FIREBASE_APP_ID,
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID
   })
+})
+
+app.post('/api/create-order', async (req, res) => {
+  const { plan } = req.body
+  const amounts: Record<string, number> = { basic: 9900, pro: 19900 } // paise
+  if (!amounts[plan]) return res.status(400).json({ error: 'Invalid plan' })
+  try {
+    const order = await razorpay.orders.create({
+      amount: amounts[plan],
+      currency: 'INR',
+      receipt: `order_${Date.now()}`
+    })
+    res.json(order)
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/verify-payment', async (req, res) => {
+  if (!adminDb) {
+    return res.status(500).json({ error: 'Firebase Admin not configured. Provide FIREBASE_PRIVATE_KEY in .env.' })
+  }
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, uid, plan } = req.body
+  const body = razorpay_order_id + '|' + razorpay_payment_id
+  const expectedSignature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+    .update(body).digest('hex')
+  if (expectedSignature !== razorpay_signature) {
+    return res.status(400).json({ error: 'Invalid payment signature' })
+  }
+  // Payment verified — upgrade user in Firestore
+  const now = new Date()
+  const resetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  await adminDb.collection('users').doc(uid).set({
+    plan,
+    queriesUsed: 0,
+    queriesLimit: plan === 'basic' ? 500 : 2000,
+    planStarted: now.toISOString(),
+    planResets: resetDate.toISOString()
+  }, { merge: true })
+  res.json({ success: true, plan })
 })
 
 app.get('/api/tools', auth, (_, res) => {
