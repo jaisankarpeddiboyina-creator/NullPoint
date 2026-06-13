@@ -8,94 +8,101 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'
   import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js'
-  const configRes = await fetch('/api/config')
-  const firebaseConfig = await configRes.json()
+  try {
+    const configRes = await fetch('/api/config')
+    const firebaseConfig = await configRes.json()
 
-  const app = initializeApp(firebaseConfig)
-  const auth = getAuth(app)
-  const db = getFirestore(app)
-  const provider = new GoogleAuthProvider()
+    const app = initializeApp(firebaseConfig)
+    const auth = getAuth(app)
+    const db = getFirestore(app)
+    const provider = new GoogleAuthProvider()
 
-  let currentUser = null
+    let currentUser = null
 
-  // Auth state listener
-  onAuthStateChanged(auth, async (user) => {
-    currentUser = user
-    if (user) {
-      document.getElementById('auth-btn').textContent = 'Sign Out'
-      document.getElementById('user-name').textContent = user.displayName
-      document.getElementById('user-avatar').src = user.photoURL
-      document.getElementById('user-info').style.display = 'flex'
-      await loadHistory()
-    } else {
-      document.getElementById('auth-btn').textContent = 'Sign in with Google'
-      document.getElementById('user-info').style.display = 'none'
-    }
-  })
-
-  // Login/logout
-  window.handleAuth = async () => {
-    if (currentUser) {
-      await signOut(auth)
-    } else {
-      await signInWithPopup(auth, provider)
-    }
-  }
-
-  // Save message to Firebase
-  window.saveToHistory = async (userMsg, botResponse) => {
-    if (!currentUser) return
-    await addDoc(collection(db, 'users', currentUser.uid, 'chats'), {
-      userMessage: userMsg,
-      botResponse: botResponse,
-      timestamp: serverTimestamp()
-    })
-    await loadHistory()
-  }
-
-window.appendMessage = (sender, text) => {
-    if (sender === 'user') {
-      const msgs = document.getElementById('msgs')
-      if (msgs) msgs.innerHTML = ''
-      addUser(text)
-    } else {
-      hideEmpty()
-      msgCount++
-      const mid = 'msg' + msgCount
-      const el = document.createElement('div')
-      el.className = 'msg msg-a'
-      el.innerHTML = `
-        <div class="bubble bubble-a" id="bb${mid}">
-          ${fmt(text)}
-        </div>
-        <div class="rich" id="rc${mid}"></div>
-        <div class="meta" id="mm${mid}"></div>`
-      const msgs = document.getElementById('msgs')
-      if (msgs) msgs.appendChild(el)
-      scroll()
-    }
-  }
-
-  window.appendMessage = window.appendMessage
-
-  // Load history
-  window.loadHistory = async () => {
-    if (!currentUser) return
-    const q = query(collection(db, 'users', currentUser.uid, 'chats'), orderBy('timestamp', 'desc'), limit(20))
-    const snapshot = await getDocs(q)
-    const historyContainer = document.getElementById('history-list')
-    historyContainer.innerHTML = ''
-    snapshot.forEach(doc => {
-      const data = doc.data()
-      const item = document.createElement('div')
-      item.className = 'history-item'
-      item.textContent = data.userMessage
-      item.onclick = () => {
-        appendMessage('user', data.userMessage)
-        appendMessage('bot', data.botResponse)
+    // Auth state listener
+    onAuthStateChanged(auth, async (user) => {
+      currentUser = user
+      if (user) {
+        document.getElementById('auth-btn').textContent = 'Sign Out'
+        document.getElementById('user-name').textContent = user.displayName
+        document.getElementById('user-avatar').src = user.photoURL
+        document.getElementById('user-info').style.display = 'flex'
+        await loadHistory()
+      } else {
+        document.getElementById('auth-btn').textContent = 'Sign in with Google'
+        document.getElementById('user-info').style.display = 'none'
       }
-      historyContainer.appendChild(item)
     })
+
+    // Login/logout
+    window.handleAuth = async () => {
+      if (currentUser) {
+        await signOut(auth)
+      } else {
+        await signInWithPopup(auth, provider)
+      }
+    }
+
+    // Save message to Firebase
+    window.saveToHistory = async (userMsg, botResponse) => {
+      if (!currentUser) return
+      await addDoc(collection(db, 'users', currentUser.uid, 'chats'), {
+        userMessage: userMsg,
+        botResponse: botResponse,
+        timestamp: serverTimestamp()
+      })
+      await loadHistory()
+    }
+
+    window.appendMessage = (sender, text) => {
+      if (sender === 'user') {
+        const msgs = document.getElementById('msgs')
+        if (msgs) msgs.innerHTML = ''
+        addUser(text)
+      } else {
+        hideEmpty()
+        msgCount++
+        const mid = 'msg' + msgCount
+        const el = document.createElement('div')
+        el.className = 'msg msg-a'
+        el.innerHTML = `
+          <div class="bubble bubble-a" id="bb${mid}">
+            ${fmt(text)}
+          </div>
+          <div class="rich" id="rc${mid}"></div>
+          <div class="meta" id="mm${mid}"></div>`
+        const msgs = document.getElementById('msgs')
+        if (msgs) msgs.appendChild(el)
+        scroll()
+      }
+    }
+
+    window.appendMessage = window.appendMessage
+
+    // Load history
+    window.loadHistory = async () => {
+      if (!currentUser) return
+      const q = query(collection(db, 'users', currentUser.uid, 'chats'), orderBy('timestamp', 'desc'), limit(20))
+      const snapshot = await getDocs(q)
+      const historyContainer = document.getElementById('history-list')
+      historyContainer.innerHTML = ''
+      snapshot.forEach(doc => {
+        const data = doc.data()
+        const item = document.createElement('div')
+        item.className = 'history-item'
+        item.textContent = data.userMessage
+        item.onclick = () => {
+          appendMessage('user', data.userMessage)
+          appendMessage('bot', data.botResponse)
+        }
+        historyContainer.appendChild(item)
+      })
+    }
+  } catch(e) {
+    console.warn('Firebase unavailable:', e.message)
+    window.handleAuth = () => alert('Auth unavailable. Check server.')
+    window.saveToHistory = async () => {}
+    window.loadHistory = async () => {}
   }
 </script>
 <style>
@@ -234,6 +241,21 @@ textarea::placeholder{color:var(--t3)}
   border-color: var(--ac);
   color: var(--t1);
 }
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  #history-sidebar, .inp-area, .hdr, button, .btn-new, #auth-btn, #user-info, .dot { display: none !important; }
+  .app { max-width: 100% !important; height: auto !important; }
+  .msgs { overflow: visible !important; height: auto !important; padding: 20px !important; }
+  .bubble-u { background: #e3f2fd !important; color: #000 !important; }
+  .bubble-a { background: #f5f5f5 !important; color: #000 !important; border: 1px solid #ddd !important; }
+  .r-card, .r-list, .r-chart { border: 1px solid #ddd !important; background: #fafafa !important; }
+  .ci { background: #f0f0f0 !important; }
+  .ci-val, .ci-lbl { color: #000 !important; }
+  .r-img img { max-height: 300px !important; }
+  .meta { color: #666 !important; }
+  .badge { border: 1px solid #ccc !important; color: #333 !important; }
+  a { color: #000 !important; }
+}
 </style>
 </head>
 <body>
@@ -258,6 +280,7 @@ textarea::placeholder{color:var(--t3)}
       </div>
       <button id="auth-btn" onclick="handleAuth()" style="background:#00e5ff; color:#000; border:none; padding:6px 14px; border-radius:20px; cursor:pointer; font-weight:600;">Sign in with Google</button>
       <button class="btn-new" onclick="newChat()">New Chat</button>
+      <button class="btn-new" onclick="window.print()">Export PDF</button>
     </div>
   </header>
 
@@ -542,13 +565,13 @@ async function send(){
       }
     }
     if (started && text) {
-      await window.saveToHistory(q, text)
+      window.saveToHistory(q, text).catch(e => console.warn('Failed to save to history:', e))
     }
   }catch(e){
     bb.innerHTML='<span style="color:var(--red)">⚠ '+esc(e.message)+'</span>'
+  }finally{
+    busy=false; $('sendBtn').disabled=false; $('inp').focus()
   }
-
-  busy=false; $('sendBtn').disabled=false; $('inp').focus()
 }
 
 async function newChat(){
@@ -571,6 +594,7 @@ async function newChat(){
 
 window.onload=()=>{
   $('inp').focus()
+  console.log('send ready, busy=', busy)
   // API key can be set via env file or localStorage
 }
 </script>
