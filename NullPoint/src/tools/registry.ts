@@ -1,26 +1,38 @@
-/**
- * NullPoint — Tools Registry
- * 20+ world-class APIs. Zero auth. One registration loop.
- * Wrapped with AILink — observable, orchestratable, unstoppable.
- */
-
 import { AILink } from '@ailink/sdk'
 import { remember } from '../rag/memory'
+import { AsyncLocalStorage } from 'async_hooks'
 
-// Captured tool results for rich UI rendering
+// Session-isolated tool results for rich UI rendering to prevent concurrency race conditions
+export const toolResultsStorage = new AsyncLocalStorage<Record<string, any>>()
+
+// Kept for backward compatibility, but unused in concurrent queries
 export const lastResults: Record<string, any> = {}
 
-async function get(url: string, params?: Record<string, any>): Promise<any> {
+async function request(
+  url: string,
+  method: 'GET' | 'POST' = 'GET',
+  body?: any,
+  params?: Record<string, any>
+): Promise<any> {
   const fullUrl = params ? `${url}?${new URLSearchParams(params as any)}` : url
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
 
   try {
-    const res = await fetch(fullUrl, {
-      headers: { 'User-Agent': 'NullPoint/1.0' },
+    const options: RequestInit = {
+      method,
+      headers: {
+        'User-Agent': 'NullPoint/1.0',
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
       signal: controller.signal
-    })
+    }
+    if (body) {
+      options.body = JSON.stringify(body)
+    }
+
+    const res = await fetch(fullUrl, options)
     if (!res.ok) throw new Error(`${res.status} ${url}`)
     const ct = res.headers.get('content-type') || ''
     return ct.includes('json') ? res.json() : res.text()
@@ -29,12 +41,25 @@ async function get(url: string, params?: Record<string, any>): Promise<any> {
   }
 }
 
+async function get(url: string, params?: Record<string, any>): Promise<any> {
+  return request(url, 'GET', undefined, params)
+}
+
 function reg(ai: AILink, name: string, fn: (a: any) => Promise<any>, description: string, parameters: any, group: string) {
   ai.register(name, async (args: any) => {
-    const result = await fn(args)
-    lastResults[name] = result
-    remember(name, result)
-    return result
+    try {
+      const result = await fn(args)
+      const store = toolResultsStorage.getStore()
+      if (store) {
+        store[name] = result
+      }
+      lastResults[name] = result
+      remember(name, result)
+      return result
+    } catch (error: any) {
+      console.error(`Error executing tool ${name}:`, error)
+      return { error: `Failed to execute ${name}: ${error.message}` }
+    }
   }, { description, parameters, group })
 }
 
@@ -173,11 +198,11 @@ export function registerTools(ai: AILink) {
     async ({ query }) => {
       const d = await get(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`)
       return d?.slice(0, 5).map((r: any) => ({
-        name: r.show.name, genres: r.show.genres, status: r.show.status,
-        rating: r.show.rating?.average,
-        summary: r.show.summary?.replace(/<[^>]*>/g, '').slice(0, 180),
-        image: r.show.image?.medium, premiered: r.show.premiered, network: r.show.network?.name
-      }))
+        name: r.show?.name || '', genres: r.show?.genres || [], status: r.show?.status || '',
+        rating: r.show?.rating?.average || null,
+        summary: (r.show?.summary || '').replace(/<[^>]*>/g, '').slice(0, 180),
+        image: r.show?.image?.medium || null, premiered: r.show?.premiered || '', network: r.show?.network?.name || ''
+      })) || []
     },
     'Search TV shows. Returns genres, rating, status, and poster image.',
     { type: 'object', properties: { query: { type: 'string', description: 'TV show name' } }, required: ['query'] },
@@ -189,10 +214,10 @@ export function registerTools(ai: AILink) {
     async ({ query, limit = 5 }) => {
       const d = await get('https://api.jikan.moe/v4/anime', { q: query, limit })
       return d.data?.map((a: any) => ({
-        title: a.title, titleEnglish: a.title_english, score: a.score, episodes: a.episodes,
-        status: a.status, genres: a.genres?.map((g: any) => g.name),
-        synopsis: a.synopsis?.slice(0, 200) + '...', image: a.images?.jpg?.image_url
-      }))
+        title: a.title || '', titleEnglish: a.title_english || '', score: a.score || null, episodes: a.episodes || null,
+        status: a.status || '', genres: a.genres?.map((g: any) => g.name) || [],
+        synopsis: a.synopsis ? a.synopsis.slice(0, 200) + '...' : '', image: a.images?.jpg?.image_url || null
+      })) || []
     },
     'Search anime series. Returns score, episodes, genres, synopsis, and poster.',
     { type: 'object', properties: { query: { type: 'string', description: 'Anime title' }, limit: { type: 'number' } }, required: ['query'] },
@@ -206,11 +231,11 @@ export function registerTools(ai: AILink) {
         ? await get(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`)
         : await get('https://www.themealdb.com/api/json/v1/1/random.php')
       return d.meals?.slice(0, 3).map((m: any) => ({
-        name: m.strMeal, category: m.strCategory, area: m.strArea,
-        instructions: m.strInstructions?.slice(0, 400) + '...',
-        image: m.strMealThumb, youtube: m.strYoutube,
+        name: m.strMeal || '', category: m.strCategory || '', area: m.strArea || '',
+        instructions: m.strInstructions ? m.strInstructions.slice(0, 400) + '...' : '',
+        image: m.strMealThumb || null, youtube: m.strYoutube || null,
         ingredients: Object.keys(m).filter(k => k.startsWith('strIngredient') && m[k]).map(k => m[k]).filter(Boolean).slice(0, 8)
-      }))
+      })) || []
     },
     'Search recipes and meals. Returns ingredients, instructions, and food image.',
     { type: 'object', properties: { query: { type: 'string', description: 'Meal name or ingredient (empty for random)' } }, required: [] },
@@ -294,8 +319,8 @@ export function registerTools(ai: AILink) {
     async ({ season = 'current' }) => {
       const d = await get(`https://ergast.com/api/f1/${season}/driverStandings.json`)
       return d.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.slice(0, 10).map((d: any) => ({
-        position: d.position, driver: `${d.Driver.givenName} ${d.Driver.familyName}`,
-        nationality: d.Driver.nationality, team: d.Constructors?.[0]?.name, points: d.points, wins: d.wins
+        position: d.position, driver: `${d.Driver?.givenName || ''} ${d.Driver?.familyName || ''}`.trim(),
+        nationality: d.Driver?.nationality || '', team: d.Constructors?.[0]?.name || '', points: d.points, wins: d.wins
       }))
     },
     'Get Formula 1 driver standings for current or any historical season.',
@@ -310,7 +335,7 @@ export function registerTools(ai: AILink) {
       return (d[`${type}s`] || []).map((item: any) => ({
         name: item.name || item.title, id: item.id,
         disambiguation: item.disambiguation, country: item.country,
-        tags: item.tags?.slice(0, 5).map((t: any) => t.name)
+        tags: item.tags?.slice(0, 5)?.map((t: any) => t.name) || []
       }))
     },
     'Search music artists, albums, or songs from MusicBrainz.',
@@ -336,11 +361,7 @@ export function registerTools(ai: AILink) {
 
   reg(ai, 'translateText',
     async ({ text, source = 'auto', target }) => {
-      const res = await fetch('https://libretranslate.de/translate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: text, source, target, format: 'text' })
-      })
-      return res.json()
+      return await request('https://libretranslate.de/translate', 'POST', { q: text, source, target, format: 'text' })
     },
     'Translate text between any languages. Supports auto-detection of source language.',
     { type: 'object', properties: { text: { type: 'string' }, source: { type: 'string', description: 'Language code or "auto"' }, target: { type: 'string', description: 'Target language code e.g. es, fr, ja, de' } }, required: ['text', 'target'] },
@@ -411,7 +432,13 @@ export function registerTools(ai: AILink) {
   reg(ai, 'getWorldBankData',
     async ({ country, indicator = 'NY.GDP.MKTP.CD' }) => {
       const d = await get(`https://api.worldbank.org/v2/country/${country}/indicator/${indicator}`, { format: 'json', mrv: 5 })
-      return { country: d[1]?.[0]?.country?.value, indicator, data: d[1]?.filter((x: any) => x.value).map((x: any) => ({ year: x.date, value: x.value })) }
+      const countryData = Array.isArray(d) ? d[1] : null
+      if (!Array.isArray(countryData)) return { country: '', indicator, data: [] }
+      return {
+        country: countryData[0]?.country?.value || '',
+        indicator,
+        data: countryData.filter((x: any) => x && x.value !== null).map((x: any) => ({ year: x.date, value: x.value }))
+      }
     },
     'Get World Bank economic data for any country. GDP, population, poverty and more.',
     { type: 'object', properties: { country: { type: 'string', description: 'Country code e.g. US, CN, IN' }, indicator: { type: 'string', description: 'World Bank indicator (default: GDP)' } }, required: ['country'] },

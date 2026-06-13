@@ -4,7 +4,7 @@
  */
 
 import { AILink } from '@ailink/sdk'
-import { registerTools, lastResults } from '../tools/registry'
+import { registerTools, lastResults, toolResultsStorage } from '../tools/registry'
 import { routeQuery } from '../router/semantic'
 import { recall, clearMemory } from '../rag/memory'
 import * as dotenv from 'dotenv'
@@ -60,18 +60,19 @@ export class NullPointAgent {
   private sessionId: string
 
   constructor() {
-    if (!process.env.GROQ_API_KEY) {
+    const provider = process.env.AI_PROVIDER || 'groq'
+    const key = provider === 'openai' ? process.env.OPENAI_API_KEY : process.env.GROQ_API_KEY
+    if (!key) {
       throw new Error(
-        '\n❌  GROQ_API_KEY missing.\n' +
-        '    1. Copy .env.example → .env\n' +
-        '    2. Add your key from https://console.groq.com (free)\n'
+        `\n❌  API Key missing for provider "${provider}".\n` +
+        `    Please set ${provider === 'openai' ? 'OPENAI_API_KEY' : 'GROQ_API_KEY'} in your .env file.\n`
       )
     }
 
     this.ai = new AILink({
-      provider: (process.env.AI_PROVIDER as any) || 'groq',
-      providerKey: process.env.GROQ_API_KEY,
-      model: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
+      provider: provider as any,
+      providerKey: key,
+      model: process.env.AI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'llama-3.3-70b-versatile'),
       maxIterations: 5,
     })
 
@@ -81,8 +82,8 @@ export class NullPointAgent {
     this.session = this.ai.createSession(this.sessionId, 3)  // Reduced to 3 to prevent token bloat on Groq free tier
 
     console.log(`\n⚡ NullPoint ready`)
-    console.log(`   Provider : ${process.env.AI_PROVIDER || 'groq'}`)
-    console.log(`   Model    : ${process.env.AI_MODEL || 'llama-3.3-70b-versatile'}`)
+    console.log(`   Provider : ${provider}`)
+    console.log(`   Model    : ${process.env.AI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'llama-3.3-70b-versatile')}`)
     console.log(`   Tools    : ${this.ai.tools().length}\n`)
   }
 
@@ -116,33 +117,39 @@ export class NullPointAgent {
     const tokens = this.estimateTokens(prompt)
     console.log(`   Prompt size: ${prompt.length} chars ≈ ${tokens} tokens`)
 
-    // 4. Clear captured results before this run
+    // 4. Clear captured results before this run (legacy fallback, thread-unsafe but kept)
     for (const k of Object.keys(lastResults)) delete lastResults[k]
+
+    // Initialize local store for this request context
+    const requestStore: Record<string, any> = {}
 
     // 5. Run through AILink with group-filtered tools
     try {
-      const result = await this.session.run(prompt, { groups })
+      const result = await toolResultsStorage.run(requestStore, async () => {
+        return await this.session.run(prompt, { groups })
+      })
 
       const text: string = result.response || ''
       const toolsUsed: string[] = result.toolsCalled || []
 
       console.log(`✅  ${toolsUsed.join(' · ') || 'no tools'} · ${Date.now() - start}ms`)
 
-      // 6. Build rich content from captured tool results
+      // 6. Build rich content from captured tool results in the request store
       const richContent: RichItem[] = []
       for (const toolName of toolsUsed) {
         const richType = RICH_MAP[toolName]
-        if (richType && lastResults[toolName]) {
-          if (toolName === 'getWikipediaSummary' && lastResults[toolName].thumbnail) {
+        const toolData = requestStore[toolName]
+        if (richType && toolData) {
+          if (toolName === 'getWikipediaSummary' && toolData.thumbnail) {
             richContent.push({
               type: 'image',
               toolName,
-              data: { url: lastResults[toolName].thumbnail, title: lastResults[toolName].title }
+              data: { url: toolData.thumbnail, title: toolData.title }
             })
             continue
           }
 
-          richContent.push({ type: richType, toolName, data: lastResults[toolName] })
+          richContent.push({ type: richType, toolName, data: toolData })
         }
       }
 

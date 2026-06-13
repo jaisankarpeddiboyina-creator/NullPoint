@@ -52,10 +52,36 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-XSS-Protection', '1; mode=block')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://www.gstatic.com; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "img-src 'self' data: https: http:; " +
+    "connect-src 'self' https://checkout.razorpay.com https://*.googleapis.com https://*.firebaseio.com; " +
+    "frame-src 'self' https://checkout.razorpay.com;"
+  )
+  next()
+})
+
 const requestCounts = new Map<string, {count: number, reset: number}>()
 function simpleRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
   const ip = req.headers['cf-connecting-ip'] as string || req.ip || 'unknown'
   const now = Date.now()
+
+  // Proactive cleanup to avoid memory leaks
+  if (requestCounts.size > 1000) {
+    for (const [key, val] of requestCounts.entries()) {
+      if (now > val.reset) requestCounts.delete(key)
+    }
+  }
+
   const record = requestCounts.get(ip)
   if (!record || now > record.reset) {
     requestCounts.set(ip, { count: 1, reset: now + 60000 })
@@ -72,7 +98,7 @@ app.use(express.static(path.join(__dirname, '../../ui')))
 
 // ── API Key auth ───────────────────────────────────────────────────
 const AUTH = process.env.NULLPOINT_AUTH !== 'false'
-const keys = new Set<string>((process.env.NULLPOINT_API_KEYS || '').split(',').filter(Boolean))
+const keys = new Set<string>((process.env.NULLPOINT_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean))
 
 if (AUTH && keys.size === 0) {
   const k = `np_${crypto.randomBytes(16).toString('hex')}`
@@ -106,9 +132,9 @@ app.get('/api/config', (req, res) => {
 })
 
 app.post('/api/create-order', async (req, res) => {
-  const { plan } = req.body
+  const { plan } = req.body || {}
   const amounts: Record<string, number> = { basic: 9900, pro: 19900 } // paise
-  if (!amounts[plan]) return res.status(400).json({ error: 'Invalid plan' })
+  if (!plan || !amounts[plan]) return res.status(400).json({ error: 'Invalid plan' })
   try {
     const order = await razorpay.orders.create({
       amount: amounts[plan],
@@ -125,16 +151,36 @@ app.post('/api/verify-payment', async (req, res) => {
   if (!adminDb) {
     return res.status(500).json({ error: 'Firebase Admin not configured. Provide FIREBASE_PRIVATE_KEY in .env.' })
   }
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, uid, plan } = req.body
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, uid, plan } = req.body || {}
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !uid || !plan) {
+    return res.status(400).json({ error: 'Missing required payment verification details' })
+  }
+
+  // Prevent duplicate payment redemption / replay attack
+  const paymentRef = adminDb.collection('payments').doc(razorpay_payment_id)
+  const paymentDoc = await paymentRef.get()
+  if (paymentDoc.exists) {
+    return res.status(400).json({ error: 'Payment has already been processed' })
+  }
+
   const body = razorpay_order_id + '|' + razorpay_payment_id
   const expectedSignature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
     .update(body).digest('hex')
   if (expectedSignature !== razorpay_signature) {
     return res.status(400).json({ error: 'Invalid payment signature' })
   }
-  // Payment verified — upgrade user in Firestore
+
+  // Payment verified — record first to prevent race condition, then upgrade user in Firestore
   const now = new Date()
   const resetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+  await paymentRef.set({
+    uid,
+    plan,
+    orderId: razorpay_order_id,
+    verifiedAt: now.toISOString()
+  })
+
   await adminDb.collection('users').doc(uid).set({
     plan,
     queriesUsed: 0,
@@ -142,6 +188,7 @@ app.post('/api/verify-payment', async (req, res) => {
     planStarted: now.toISOString(),
     planResets: resetDate.toISOString()
   }, { merge: true })
+
   res.json({ success: true, plan })
 })
 
@@ -152,7 +199,7 @@ app.get('/api/tools', auth, (_, res) => {
 
 // Full JSON response
 app.post('/api/query', auth, async (req, res) => {
-  const { query, reset } = req.body
+  const { query, reset } = req.body || {}
   if (!query?.trim()) return res.status(400).json({ error: 'query is required' })
   try {
     const agent = getAgent()
@@ -168,7 +215,7 @@ app.post('/api/query', auth, async (req, res) => {
 // Flow: AILink runs (gets data from tools) → we stream the text back word by word
 // This gives the "streaming" feel without needing native SDK streaming
 app.post('/api/stream', auth, async (req, res) => {
-  const { query, reset } = req.body
+  const { query, reset } = req.body || {}
   if (!query?.trim()) return res.status(400).json({ error: 'query is required' })
 
   res.setHeader('Content-Type', 'text/event-stream')
