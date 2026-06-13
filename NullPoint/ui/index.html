@@ -60,7 +60,7 @@
     await loadHistory()
   }
 
-  const appendMessage = (sender, text) => {
+window.appendMessage = (sender, text) => {
     if (sender === 'user') {
       const msgs = document.getElementById('msgs')
       if (msgs) msgs.innerHTML = ''
@@ -82,6 +82,8 @@
       scroll()
     }
   }
+
+  window.appendMessage = window.appendMessage
 
   // Load history
   window.loadHistory = async () => {
